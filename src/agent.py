@@ -1,17 +1,49 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 import os
+import types
 import numpy as np
 import torch
 from torch import optim
 from torch.nn.utils import clip_grad_norm_
 
-from model import DQN
+from .model import DQN
 
+# Setup default args for Rainbow
+args = types.SimpleNamespace()
+args.id = 'default'
+args.seed = 42
+args.disable_cuda = False
+args.architecture = 'data-efficient'
+args.hidden_size = 256
+args.noisy_std = 0.1
+args.atoms = 51
+args.V_min = -10
+args.V_max = 10
+args.memory_capacity = int(3e5)
+args.replay_frequency = 1
+args.priority_exponent = 0.5
+args.priority_weight = 0.4
+args.multi_step = 20
+args.discount = 0.99
+args.target_update = 8000
+args.reward_clip = 1
+args.learning_rate = 1e-4
+args.adam_eps = 1.5e-4
+args.batch_size = 32
+args.norm_clip = 10
+args.learn_start = 1600
+args.evaluation_interval = int(5e3)
+args.evaluation_episodes = 10
+args.evaluation_size = 500
+args.enable_cudnn = True
+args.model = None
+
+DEFAULT_RAINBOW_ARGS = args
 
 class Agent():
-  def __init__(self, args, env):
-    self.action_space = env.action_space()
+  def __init__(self, args, obs_dim, n_acts, custom_encoder=None):
+    self.n_acts = n_acts
     self.atoms = args.atoms
     self.Vmin = args.V_min
     self.Vmax = args.V_max
@@ -22,7 +54,7 @@ class Agent():
     self.discount = args.discount
     self.norm_clip = args.norm_clip
 
-    self.online_net = DQN(args, self.action_space).to(device=args.device)
+    self.online_net = DQN(args, obs_dim, self.n_acts, custom_encoder).to(device=args.device)
     if args.model:  # Load pretrained model if provided
       if os.path.isfile(args.model):
         state_dict = torch.load(args.model, map_location='cpu')  # Always load tensors onto CPU by default, will shift to GPU if necessary
@@ -37,7 +69,7 @@ class Agent():
 
     self.online_net.train()
 
-    self.target_net = DQN(args, self.action_space).to(device=args.device)
+    self.target_net = DQN(args, obs_dim, self.n_acts, custom_encoder).to(device=args.device)
     self.update_target_net()
     self.target_net.train()
     for param in self.target_net.parameters():
@@ -56,7 +88,7 @@ class Agent():
 
   # Acts with an ε-greedy policy (used for evaluation only)
   def act_e_greedy(self, state, epsilon=0.001):  # High ε can reduce evaluation scores drastically
-    return np.random.randint(0, self.action_space) if np.random.random() < epsilon else self.act(state)
+    return np.random.randint(0, self.n_acts) if np.random.random() < epsilon else self.act(state)
 
   def learn(self, mem):
     # Sample transitions

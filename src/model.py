@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
+import copy
 import math
 import torch
 from torch import nn
@@ -47,20 +48,27 @@ class NoisyLinear(nn.Module):
 
 
 class DQN(nn.Module):
-  def __init__(self, args, action_space):
+  def __init__(self, args, input_dim, action_space, custom_encoder=None):
     super(DQN, self).__init__()
     self.atoms = args.atoms
     self.action_space = action_space
 
-    if args.architecture == 'canonical':
+    if custom_encoder is not None:
+      self.convs = copy.deepcopy(custom_encoder)
+    elif args.architecture == 'canonical':
       self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0), nn.ReLU(),
                                  nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
                                  nn.Conv2d(64, 64, 3, stride=1, padding=0), nn.ReLU())
-      self.conv_output_size = 3136
     elif args.architecture == 'data-efficient':
       self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 5, stride=5, padding=0), nn.ReLU(),
                                  nn.Conv2d(32, 64, 5, stride=5, padding=0), nn.ReLU())
-      self.conv_output_size = 576
+    else:
+      raise ValueError('Unknown architecture: {}'.format(args.architecture))
+
+    test_input = torch.zeros([1] + list(input_dim), dtype=torch.float32)
+    with torch.no_grad():
+      self.conv_output_size = self.convs(test_input).view(-1).shape[0]
+
     self.fc_h_v = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
     self.fc_h_a = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
     self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std)

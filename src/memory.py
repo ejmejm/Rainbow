@@ -3,20 +3,19 @@ from __future__ import division
 import numpy as np
 import torch
 
-
-Transition_dtype = np.dtype([('timestep', np.int32), ('state', np.uint8, (84, 84)), ('action', np.int32), ('reward', np.float32), ('nonterminal', np.bool_)])
-blank_trans = (0, np.zeros((84, 84), dtype=np.uint8), 0, 0.0, False)
-
-
 # Segment tree data structure where parent node values are sum/max of children node values
 class SegmentTree():
-  def __init__(self, size):
+  def __init__(self, size, obs_dim):
     self.index = 0
     self.size = size
     self.full = False  # Used to track actual capacity
     self.tree_start = 2**(size-1).bit_length()-1  # Put all used node leaves on last tree level
     self.sum_tree = np.zeros((self.tree_start + self.size,), dtype=np.float32)
-    self.data = np.array([blank_trans] * size, dtype=Transition_dtype)  # Build structured array
+    element_shape = tuple(obs_dim)[1:]
+    self.blank_trans = (0, np.zeros(element_shape, dtype=np.uint8), 0, 0.0, False)
+    self.Transition_dtype = np.dtype([('timestep', np.int32), ('state', np.uint8, element_shape), \
+        ('action', np.int32), ('reward', np.float32), ('nonterminal', np.bool_)])
+    self.data = np.array([self.blank_trans] * size, dtype=self.Transition_dtype)  # Build structured array
     self.max = 1  # Initial max value to return (1 = 1^ω)
 
   # Updates nodes values from current tree
@@ -89,7 +88,7 @@ class SegmentTree():
     return self.sum_tree[0]
 
 class ReplayMemory():
-  def __init__(self, args, capacity):
+  def __init__(self, args, capacity, obs_dim):
     self.device = args.device
     self.capacity = capacity
     self.history = args.history_length
@@ -99,7 +98,7 @@ class ReplayMemory():
     self.priority_exponent = args.priority_exponent
     self.t = 0  # Internal episode timestep counter
     self.n_step_scaling = torch.tensor([self.discount ** i for i in range(self.n)], dtype=torch.float32, device=self.device)  # Discount-scaling vector for n-step returns
-    self.transitions = SegmentTree(capacity)  # Store transitions in a wrap-around cyclic buffer within a sum tree for querying priorities
+    self.transitions = SegmentTree(capacity, obs_dim)  # Store transitions in a wrap-around cyclic buffer within a sum tree for querying priorities
 
   # Adds state and action at time t, reward and terminal at time t + 1
   def append(self, state, action, reward, terminal):
@@ -117,7 +116,7 @@ class ReplayMemory():
       blank_mask[:, t] = np.logical_or(blank_mask[:, t + 1], transitions_firsts[:, t + 1]) # True if future frame has timestep 0
     for t in range(self.history, self.history + self.n):  # e.g. 4 5 6
       blank_mask[:, t] = np.logical_or(blank_mask[:, t - 1], transitions_firsts[:, t]) # True if current or past frame has timestep 0
-    transitions[blank_mask] = blank_trans
+    transitions[blank_mask] = self.transitions.blank_trans
     return transitions
 
   # Returns a valid sample from each segment
@@ -172,7 +171,7 @@ class ReplayMemory():
     blank_mask = np.zeros_like(transitions_firsts, dtype=np.bool_)
     for t in reversed(range(self.history - 1)):
       blank_mask[t] = np.logical_or(blank_mask[t + 1], transitions_firsts[t + 1]) # If future frame has timestep 0
-    transitions[blank_mask] = blank_trans
+    transitions[blank_mask] = self.transitions.blank_trans
     state = torch.tensor(transitions['state'], dtype=torch.float32, device=self.device).div_(255)  # Agent will turn into batch
     self.current_idx += 1
     return state

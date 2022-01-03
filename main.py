@@ -11,10 +11,10 @@ import numpy as np
 import torch
 from tqdm import trange
 
-from agent import Agent
-from env import Env
-from memory import ReplayMemory
-from test import test
+from src.agent import Agent
+from src.env import Env
+from src.memory import ReplayMemory
+from src.test import test
 
 
 # Note that hyperparameters may originally be reported in ATARI game frames instead of agent steps
